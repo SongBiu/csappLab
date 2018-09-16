@@ -8,16 +8,21 @@
 
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
+typedef struct cacheInfo
+{
+    char *hostname, *port;
+    char *path;
+} info;
 void parse_uri(char *uri, char *hostname, char *port, char *path);
-void doit(int fd);
-void build_http_header(char* method, char *uri, char* version, char* buf);
+void doit(int *fd);
+void build_http_header(char *method, char *path, char *version, char *header);
 
 int main(int argc, char **argv)
 {
     int listenfd, connfd;
-    char hostname[MAXLINE], port[MAXLINE];
     socklen_t clientlen;
     struct sockaddr_storage clientaddr;
+    pthread_t thread_id;
     if (argc != 2) {
         fprintf(stderr, "usage: %s <port>\n", argv[0]);
         exit(1);
@@ -27,35 +32,38 @@ int main(int argc, char **argv)
     {
         clientlen = sizeof(clientaddr);
 	    connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        Getnameinfo((SA *) &clientaddr, clientlen, hostname, MAXLINE, 
-                    port, MAXLINE, 0);
-        printf("Accepted connection from (%s, %s)\n", hostname, port);
-        doit(connfd);
+        Pthread_create(&thread_id, NULL, (void *)(&doit), (void *)(&connfd));
     }
-    printf("%s", user_agent_hdr);
     return 0;
 }
 
-void doit(int fd) 
+void doit(int *fd) 
 {
     int clientfd;
-    struct hostent *host_server;
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char hostname[MAXLINE], path[MAXLINE], port[MAXLINE];
+    char hostname[MAXLINE], path[MAXLINE], port[MAXLINE], header[MAXLINE];
+    char response[MAX_CACHE_SIZE];
     rio_t rio_server, rio_client;
-    struct in_addr ina;
 
-    Rio_readinitb(&rio_server, fd);
+    Rio_readinitb(&rio_server, *fd);
     if (!Rio_readlineb(&rio_server, buf, MAXLINE))
     {
         return;
-    } 
-        
+    }
+    // parser http request
     sscanf(buf, "%s %s %s", method, uri, version);
     parse_uri(uri, hostname, port, path);
-    printf("%s\n%s\n", hostname, port);
+    build_http_header(method, path, version, header);
     clientfd = Open_clientfd(hostname, port);
-
+    Rio_readinitb(&rio_client, clientfd);
+    Rio_writen(clientfd, (void *)header, sizeof(header));
+    printf("%s\r\n", header);
+    while (Rio_readlineb(&rio_client, buf, MAXLINE))
+    {
+        strcat(response, buf);
+    }
+    printf("%s\r\n", response);
+    Rio_writen(*fd, (void *)response, sizeof(response));
     return;
 }
 void parse_uri(char *uri, char *hostname, char *port, char *path)
@@ -81,7 +89,8 @@ void parse_uri(char *uri, char *hostname, char *port, char *path)
     sprintf(port, "%d", p);
     return;
 }
-void build_http_header(char *method, char *uri, char *version, char *header)
+void build_http_header(char *method, char *path, char *version, char *header)
 {
-
+    char *connect = "Host: www.cmu.edu\r\nAccept: */*\r\nConnection: close\r\nProxy-Connection: close";
+    sprintf(header, "%s %s %s\r\n%s%s\r\n\r\n", method, path, version, user_agent_hdr, connect);
 }
