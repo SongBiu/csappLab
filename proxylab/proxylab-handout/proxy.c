@@ -14,9 +14,9 @@ typedef struct cacheInfo
     char *path;
 } info;
 void parse_uri(char *uri, char *hostname, char *port, char *path);
-void doit(int *fd);
+void doit(int fd);
 void build_http_header(char *method, char *path, char *version, char *header);
-
+void handle(int *fd);
 int main(int argc, char **argv)
 {
     int listenfd, connfd;
@@ -32,12 +32,16 @@ int main(int argc, char **argv)
     {
         clientlen = sizeof(clientaddr);
 	    connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        Pthread_create(&thread_id, NULL, (void *)(&doit), (void *)(&connfd));
+        Pthread_create(&thread_id, NULL, (void *)(&handle), (void *)(&connfd));
     }
     return 0;
 }
-
-void doit(int *fd) 
+void handle(int *fd)
+{
+    doit(*fd);
+    Close(*fd);
+}
+void doit(int fd) 
 {
     int clientfd;
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
@@ -45,7 +49,7 @@ void doit(int *fd)
     char response[MAX_CACHE_SIZE];
     rio_t rio_server, rio_client;
 
-    Rio_readinitb(&rio_server, *fd);
+    Rio_readinitb(&rio_server, fd);
     if (!Rio_readlineb(&rio_server, buf, MAXLINE))
     {
         return;
@@ -57,13 +61,12 @@ void doit(int *fd)
     clientfd = Open_clientfd(hostname, port);
     Rio_readinitb(&rio_client, clientfd);
     Rio_writen(clientfd, (void *)header, sizeof(header));
-    printf("%s\r\n", header);
+
     while (Rio_readlineb(&rio_client, buf, MAXLINE))
     {
         strcat(response, buf);
     }
-    printf("%s\r\n", response);
-    Rio_writen(*fd, (void *)response, sizeof(response));
+    Rio_writen(fd, (void *)response, strlen(response));
     return;
 }
 void parse_uri(char *uri, char *hostname, char *port, char *path)
